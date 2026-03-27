@@ -188,8 +188,16 @@
     document.body.removeChild(ta); cb();
   }
 
+  function fillBalloons(){
+    const count = Math.floor((W * H) / 14000);
+    for(let i=0; i<count; i++){
+      const b = mkBalloon();
+      b.y = H * 0.1 + Math.random() * H * 0.85;
+      balloons.push(b);
+    }
+  }
+
   function mkBalloon(){
-    const r = (14 + Math.random()*14) * S;
     return{ x:r+Math.random()*(W-r*2), y:H+r, r, color:rndColor(),
       vy:-(0.18+Math.random()*0.32)*S, vx:(Math.random()-0.5)*0.18*S,
       alive:true, wobble:Math.random()*6.28 };
@@ -295,10 +303,10 @@
   canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.touches[0]; const [mx,my]=canvasXY(t.clientX,t.clientY); setAngle(mx,my); },{passive:false});
   canvas.addEventListener('touchend',  e=>{ e.preventDefault(); shoot(); },{passive:false});
 
-  window.addEventListener('resize',()=>{ resize(); balloons=[]; projs=[]; pops=[]; });
+  window.addEventListener('resize',()=>{ resize(); balloons=[]; projs=[]; pops=[]; fillBalloons(); });
 
   function loop(){
-    if(!started || canvas.offsetHeight !== H){ resize(); started=true; }
+    if(!started || canvas.offsetHeight !== H){ resize(); if(!started) fillBalloons(); started=true; }
     ctx.clearRect(0,0,W,H); drawBg(); frame++;
     if(frame%80===0) balloons.push(mkBalloon());
 
