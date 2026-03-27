@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>balloon pop</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #d6eef7;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+  }
+
+  #wrap {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #inner {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 12px 16px;
+  }
+
+  @media (min-width: 540px) {
+    body { background: #b8dcea; }
+    #inner {
+      width: 380px;
+      height: 660px;
+      border-radius: 20px;
+      background: #d6eef7;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+      padding: 16px 16px 20px;
+    }
+    #swatch { font-size: 14px; gap: 7px; }
+    #swatch-dot { width: 18px; height: 18px; min-width: 18px; }
+    #swatch-hex { font-size: 13px; padding: 3px 8px; }
+    #swatch-none { font-size: 13px; }
+  }
+
+  canvas {
+    width: 100%;
+    flex: 1 1 auto;
+    display: block;
+    border-radius: 12px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  #swatch {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 14px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-width: 0;
+    font-size: clamp(22px, 6.5vw, 26px);
+    color: #555;
+    white-space: nowrap;
+  }
+
+  #swatch-dot {
+    width: clamp(28px, 7.5vw, 34px);
+    height: clamp(28px, 7.5vw, 34px);
+    min-width: clamp(28px, 7.5vw, 34px);
+    border-radius: 5px;
+    border: 1px solid rgba(0,0,0,0.14);
+    flex-shrink: 0;
+  }
+
+  #swatch-name {
+    color: #111;
+    font-weight: 600;
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  #swatch-hex {
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+    font-size: clamp(20px, 6vw, 24px);
+    color: #555;
+    cursor: pointer;
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(0,0,0,0.14);
+    background: transparent;
+    transition: background 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+    flex-shrink: 0;
+  }
+  #swatch-hex:hover, #swatch-hex:active { background: rgba(0,0,0,0.07); }
+  #swatch-hex.copied { color: #1a7a3a; border-color: #1a7a3a; }
+  #swatch-none { color: #999; font-style: italic; font-size: clamp(22px, 7.5vw, 26px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="inner">
+    <canvas id="bpc"></canvas>
+    <div id="swatch"><div id="swatch-none">pop a balloon to pick its color</div></div>
+  </div>
+</div>
+<script>
+(function(){
+  const canvas = document.getElementById('bpc');
+  const ctx = canvas.getContext('2d');
+  let W = 1, H = 1, S = 1; // S = scale factor
+
+  function resize() {
+    W = canvas.offsetWidth  || 300;
+    H = canvas.offsetHeight || 500;
+    canvas.width  = W;
+    canvas.height = H;
+    // scale: 1.0 on desktop (>=540px wide), up to 2.0 on small phones
+    S = Math.min(2.0, Math.max(1.0, 540 / Math.max(W, 200)));
+  }
+
+  const BASE_ALEN = 46;
+  const BASE_BOW  = 28;
+  let balloons=[], projs=[], pops=[], angle=-Math.PI/2, frame=0, started=false;
+
+  function AX(){ return W/2; }
+  function AY(){ return H - 30*S; }
+  function ALEN(){ return BASE_ALEN * S; }
+  function BOWR(){ return BASE_BOW  * S; }
+
+  function rndColor(){
+    return '#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');
+  }
+
+  function hexToHsl(hex){
+    let r=parseInt(hex.slice(1,3),16)/255, g=parseInt(hex.slice(3,5),16)/255, b=parseInt(hex.slice(5,7),16)/255;
+    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+    let h=0,s=0,l=(mx+mn)/2;
+    if(d){ s=d/(1-Math.abs(2*l-1));
+      if(mx===r) h=((g-b)/d+6)%6;
+      else if(mx===g) h=(b-r)/d+2;
+      else h=(r-g)/d+4; h/=6; }
+    return [h*360,s*100,l*100];
+  }
+
+  function colorName(hex){
+    const [h,s,l]=hexToHsl(hex);
+    if(s<12){ if(l<15)return'black'; if(l>85)return'white'; return'gray'; }
+    const lw=l<30?'dark ':l>70?'light ':'';
+    if(h<15||h>=345) return lw+'red';
+    if(h<40)  return lw+'orange';
+    if(h<65)  return lw+'yellow';
+    if(h<150) return lw+'green';
+    if(h<195) return lw+'cyan';
+    if(h<255) return lw+'blue';
+    if(h<285) return lw+'purple';
+    if(h<345) return lw+'pink';
+    return lw+'red';
+  }
+
+  function setLastColor(hex){
+    const sw=document.getElementById('swatch');
+    sw.innerHTML=`ur color: <div id="swatch-dot" style="background:${hex}"></div><div id="swatch-hex">${hex.toUpperCase()}</div>`;
+    document.getElementById('swatch-hex').addEventListener('click',function(){
+      const val=hex.toUpperCase(), el=this;
+      function done(){ el.textContent='copied!'; el.classList.add('copied'); setTimeout(()=>{ el.textContent=val; el.classList.remove('copied'); },1400); }
+      if(navigator.clipboard) navigator.clipboard.writeText(val).then(done).catch(()=>fbCopy(val,done));
+      else fbCopy(val,done);
+    });
+  }
+
+  function fbCopy(text,cb){
+    const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.cssText='position:fixed;opacity:0'; document.body.appendChild(ta);
+    ta.focus(); ta.select(); try{ document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta); cb();
+  }
+
+  function mkBalloon(){
+    const r = (14 + Math.random()*14) * S;
+    return{ x:r+Math.random()*(W-r*2), y:H+r, r, color:rndColor(),
+      vy:-(0.18+Math.random()*0.32)*S, vx:(Math.random()-0.5)*0.18*S,
+      alive:true, wobble:Math.random()*6.28 };
+  }
+
+  function drawBalloon(b){
+    b.wobble+=0.045;
+    const x=b.x+Math.sin(b.wobble)*2*S, y=b.y;
+    // string
+    ctx.beginPath(); ctx.moveTo(x, y+b.r*1.1+3*S);
+    ctx.quadraticCurveTo(x+9*S, y+b.r*1.1+22*S, x-6*S, y+b.r*1.1+42*S);
+    ctx.strokeStyle='rgba(70,50,30,0.45)'; ctx.lineWidth=S; ctx.stroke();
+    // body
+    ctx.beginPath(); ctx.ellipse(x,y,b.r,b.r*1.15,0,0,Math.PI*2);
+    ctx.fillStyle=b.color; ctx.fill();
+    // knot
+    ctx.beginPath(); ctx.arc(x,y+b.r*1.1,3*S,0,Math.PI*2); ctx.fillStyle=b.color; ctx.fill();
+    // shine
+    ctx.beginPath(); ctx.ellipse(x-b.r*.28,y-b.r*.3,b.r*.22,b.r*.17,-0.4,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.38)'; ctx.fill();
+  }
+
+  function mkProj(){
+    return{ x:AX()+Math.cos(angle)*ALEN(), y:AY()+Math.sin(angle)*ALEN(),
+      vx:Math.cos(angle)*10*S, vy:Math.sin(angle)*10*S, alive:true };
+  }
+
+  function drawProj(p){
+    const a=Math.atan2(p.vy,p.vx), L=20*S;
+    ctx.beginPath(); ctx.moveTo(p.x-Math.cos(a)*L,p.y-Math.sin(a)*L); ctx.lineTo(p.x,p.y);
+    ctx.strokeStyle='#412402'; ctx.lineWidth=1.5*S; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.x,p.y);
+    ctx.lineTo(p.x-Math.cos(a-.32)*9*S, p.y-Math.sin(a-.32)*9*S);
+    ctx.lineTo(p.x-Math.cos(a+.32)*9*S, p.y-Math.sin(a+.32)*9*S);
+    ctx.closePath(); ctx.fillStyle='#888780'; ctx.fill();
+  }
+
+  function mkPop(x,y,color){
+    return{ x,y,color,life:1,alive:true,
+      pts:Array.from({length:10},(_,i)=>({ a:(i/10)*6.28+Math.random()*.4, d:0, s:(1.8+Math.random()*2.2)*S })) };
+  }
+
+  function drawPop(p){
+    p.life-=0.055; if(p.life<=0){ p.alive=false; return; }
+    ctx.globalAlpha=p.life;
+    p.pts.forEach(pt=>{ pt.d+=pt.s;
+      ctx.beginPath(); ctx.arc(p.x+Math.cos(pt.a)*pt.d, p.y+Math.sin(pt.a)*pt.d, 3*S, 0, Math.PI*2);
+      ctx.fillStyle=p.color; ctx.fill(); });
+    ctx.beginPath(); ctx.arc(p.x,p.y,(1-p.life)*38*S,0,Math.PI*2);
+    ctx.strokeStyle=p.color; ctx.lineWidth=2.5*S; ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+
+  function drawBow(){
+    const ax=AX(), ay=AY(), bR=BOWR();
+    const a1=angle-Math.PI*.44, a2=angle+Math.PI*.44;
+    ctx.beginPath(); ctx.arc(ax,ay,bR,a1,a2);
+    ctx.strokeStyle='#412402'; ctx.lineWidth=4*S; ctx.stroke();
+    const e1x=ax+Math.cos(a1)*bR, e1y=ay+Math.sin(a1)*bR;
+    const e2x=ax+Math.cos(a2)*bR, e2y=ay+Math.sin(a2)*bR;
+    const px=ax-Math.cos(angle)*6*S, py=ay-Math.sin(angle)*6*S;
+    ctx.beginPath(); ctx.moveTo(e1x,e1y); ctx.lineTo(px,py); ctx.lineTo(e2x,e2y);
+    ctx.strokeStyle='#B4B2A9'; ctx.lineWidth=1.5*S; ctx.stroke();
+    const tx=ax+Math.cos(angle)*ALEN(), ty=ay+Math.sin(angle)*ALEN();
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(tx,ty);
+    ctx.strokeStyle='#633806'; ctx.lineWidth=2*S; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx,ty);
+    ctx.lineTo(tx-Math.cos(angle-.35)*11*S, ty-Math.sin(angle-.35)*11*S);
+    ctx.lineTo(tx-Math.cos(angle+.35)*11*S, ty-Math.sin(angle+.35)*11*S);
+    ctx.closePath(); ctx.fillStyle='#888780'; ctx.fill();
+  }
+
+  function drawBg(){
+    ctx.fillStyle='#C4E6F5'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.65)';
+    [[.12,.07,.09,.038],[.36,.05,.07,.030],[.72,.09,.09,.044],[.55,.16,.06,.030],[.88,.06,.07,.035]]
+    .forEach(([cx,cy,cw,ch])=>{
+      const x=cx*W, y=cy*H, w=cw*W, h=ch*H;
+      ctx.beginPath(); ctx.ellipse(x,y,w,h,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x+w*.35,y+h*.38,w*.65,h*.75,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x-w*.31,y+h*.29,w*.55,h*.7,0,0,Math.PI*2); ctx.fill();
+    });
+    ctx.fillStyle='#4A7C2A'; ctx.fillRect(0,H-18*S,W,18*S);
+    ctx.fillStyle='#3C621E'; ctx.fillRect(0,H-20*S,W,4*S);
+  }
+
+  function shoot(){ projs.push(mkProj()); }
+
+  function setAngle(mx,my){
+    let a=Math.atan2(my-AY(),mx-AX());
+    if(a>0) a=mx<AX()?-Math.PI:0;
+    angle=a;
+  }
+
+  function canvasXY(cx,cy){
+    const r=canvas.getBoundingClientRect();
+    return [(cx-r.left)*(W/r.width),(cy-r.top)*(H/r.height)];
+  }
+
+  canvas.addEventListener('mousemove', e=>{ const [mx,my]=canvasXY(e.clientX,e.clientY); setAngle(mx,my); });
+  canvas.addEventListener('click',     e=>{ const [mx,my]=canvasXY(e.clientX,e.clientY); setAngle(mx,my); shoot(); });
+  canvas.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.touches[0]; const [mx,my]=canvasXY(t.clientX,t.clientY); setAngle(mx,my); },{passive:false});
+  canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.touches[0]; const [mx,my]=canvasXY(t.clientX,t.clientY); setAngle(mx,my); },{passive:false});
+  canvas.addEventListener('touchend',  e=>{ e.preventDefault(); shoot(); },{passive:false});
+
+  window.addEventListener('resize',()=>{ resize(); balloons=[]; projs=[]; pops=[]; });
+
+  function loop(){
+    if(!started || canvas.offsetHeight !== H){ resize(); started=true; }
+    ctx.clearRect(0,0,W,H); drawBg(); frame++;
+    if(frame%80===0) balloons.push(mkBalloon());
+
+    balloons.forEach(b=>{
+      if(!b.alive)return;
+      b.x+=b.vx; b.y+=b.vy;
+      if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx);}
+      if(b.x>W-b.r){b.x=W-b.r;b.vx=-Math.abs(b.vx);}
+      if(b.y<-b.r*2) b.alive=false;
+    });
+    projs.forEach(p=>{
+      if(!p.alive)return; p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0||p.x>W||p.y<0||p.y>H) p.alive=false;
+    });
+    projs.forEach(proj=>{
+      if(!proj.alive)return;
+      balloons.forEach(b=>{
+        if(!b.alive)return;
+        const dx=proj.x-b.x, dy=proj.y-b.y;
+        if(Math.sqrt(dx*dx+dy*dy)<b.r){
+          b.alive=false; proj.alive=false;
+          pops.push(mkPop(b.x,b.y,b.color)); setLastColor(b.color);
+        }
+      });
+    });
+
+    balloons=balloons.filter(b=>b.alive);
+    projs=projs.filter(p=>p.alive);
+    balloons.forEach(drawBalloon);
+    projs.forEach(drawProj);
+    pops.forEach(drawPop);
+    pops=pops.filter(p=>p.alive);
+    drawBow();
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+})();
+</script>
+</body>
+</html>
